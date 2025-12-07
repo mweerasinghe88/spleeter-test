@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Stem Separator - Worship Team Sync</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+        }
+        .glow { box-shadow: 0 0 20px rgba(99, 102, 241, 0.3); }
+        .glow-text { text-shadow: 0 0 10px rgba(99, 102, 241, 0.5); }
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: #374151;
+            border-radius: 5px;
+            height: 8px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #6366f1;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .stem-option.active { background: #4f46e5 !important; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .processing { animation: pulse 1.5s infinite; }
+    </style>
+</head>
+<body class="text-white p-4 md:p-8">
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold glow-text mb-2">🎵 Audio Stem Separator</h1>
+            <p class="text-gray-400">AI-Powered Stem Separation for Worship Teams</p>
+            <div id="serverStatus" class="mt-2 text-sm">
+                <span class="text-yellow-400">⏳ Connecting...</span>
+            </div>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="bg-gray-800/50 rounded-2xl p-6 glow mb-6">
+            <h2 class="text-xl font-semibold mb-4">📁 Upload Audio</h2>
+            <div id="dropZone" class="border-2 border-dashed border-gray-600 rounded-xl p-8 text-center hover:border-indigo-500 transition-colors cursor-pointer">
+                <input type="file" id="audioFile" accept="audio/*" class="hidden" />
+                <label for="audioFile" class="cursor-pointer">
+                    <div class="text-5xl mb-4">🎧</div>
+                    <p class="text-lg">Click or drag to upload MP3/WAV</p>
+                    <p class="text-gray-500 text-sm mt-2">Max 50MB recommended</p>
+                </label>
+            </div>
+            <div id="fileName" class="mt-4 text-center text-indigo-400 hidden"></div>
+        </div>
+
+        <!-- Analysis Results -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-800/50 rounded-xl p-4 glow text-center">
+                <div class="text-gray-400 text-xs mb-1">TEMPO</div>
+                <div id="bpmValue" class="text-3xl font-bold text-indigo-400">--</div>
+                <div class="text-gray-500 text-sm">BPM</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-xl p-4 glow text-center">
+                <div class="text-gray-400 text-xs mb-1">KEY</div>
+                <div id="keyValue" class="text-3xl font-bold text-purple-400">--</div>
+                <div id="scaleValue" class="text-gray-500 text-sm">--</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-xl p-4 glow text-center">
+                <div class="text-gray-400 text-xs mb-1">DURATION</div>
+                <div id="durationValue" class="text-3xl font-bold text-pink-400">--</div>
+                <div class="text-gray-500 text-sm">seconds</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-xl p-4 glow text-center">
+                <div class="text-gray-400 text-xs mb-1">STATUS</div>
+                <div id="statusValue" class="text-3xl font-bold text-green-400">⏸️</div>
+                <div id="statusText" class="text-gray-500 text-sm">Ready</div>
+            </div>
+        </div>
+
+        <!-- Stem Separation -->
+        <div class="bg-gray-800/50 rounded-2xl p-6 glow mb-6">
+            <h2 class="text-xl font-semibold mb-4">🎛️ AI Stem Separation</h2>
+            
+            <div class="mb-4">
+                <label class="text-gray-400 text-sm mb-2 block">Separation Mode:</label>
+                <div class="flex flex-wrap gap-2">
+                    <button class="stem-option active bg-gray-700 hover:bg-indigo-600 px-4 py-2 rounded-lg text-sm" data-stems="2">
+                        2 Stems (Vocals + Music)
+                    </button>
+                    <button class="stem-option bg-gray-700 hover:bg-indigo-600 px-4 py-2 rounded-lg text-sm" data-stems="4">
+                        4 Stems (Vocals, Drums, Bass, Other)
+                    </button>
+                    <button class="stem-option bg-gray-700 hover:bg-indigo-600 px-4 py-2 rounded-lg text-sm" data-stems="5">
+                        5 Stems (+ Piano)
+                    </button>
+                </div>
+            </div>
+
+            <button id="separateBtn" disabled class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed py-4 rounded-xl font-semibold text-lg transition-all mb-4">
+                🚀 Separate Stems
+            </button>
+
+            <div id="progressContainer" class="hidden mb-4">
+                <div class="flex justify-between text-sm text-gray-400 mb-1">
+                    <span id="progressText">Processing...</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="bg-gray-700 rounded-full h-3 overflow-hidden">
+                    <div id="progressBar" class="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div id="stemsContainer" class="hidden">
+                <h3 class="text-lg font-semibold mb-3">🎚️ Separated Stems:</h3>
+                <div id="stemsList" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+            </div>
+        </div>
+
+        <!-- Playback -->
+        <div class="bg-gray-800/50 rounded-2xl p-6 glow mb-6">
+            <h2 class="text-xl font-semibold mb-4">▶️ Playback</h2>
+            
+            <div class="flex flex-wrap justify-center gap-3 mb-6">
+                <button id="playOriginalBtn" disabled class="bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600 disabled:cursor-not-allowed px-6 py-3 rounded-lg font-semibold">
+                    ▶️ Play Original
+                </button>
+                <button id="stopBtn" disabled class="bg-gray-600 hover:bg-gray-700 disabled:cursor-not-allowed px-6 py-3 rounded-lg font-semibold">
+                    ⏹️ Stop
+                </button>
+            </div>
+
+            <div class="mb-6">
+                <div class="flex justify-between mb-2">
+                    <label class="text-gray-400">🎹 Pitch Shift</label>
+                    <span id="pitchDisplay" class="text-indigo-400 font-mono">0 semitones</span>
+                </div>
+                <input type="range" id="pitchSlider" min="-12" max="12" value="0" class="w-full" />
+            </div>
+
+            <div class="mb-4">
+                <div class="flex justify-between mb-2">
+                    <label class="text-gray-400">⏱️ Speed</label>
+                    <span id="speedDisplay" class="text-indigo-400 font-mono">100%</span>
+                </div>
+                <input type="range" id="speedSlider" min="50" max="150" value="100" class="w-full" />
+            </div>
+        </div>
+
+        <div class="text-center text-gray-500 text-sm">
+            <p>Powered by Deezer Spleeter AI • Worship Team Sync</p>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin + '/api';
+        
+        let audioContext, audioBuffer, sourceNode, gainNode;
+        let isPlaying = false, currentPitch = 0, currentSpeed = 1;
+        let selectedStems = '2', currentJobId = null, uploadedFile = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            checkServer();
+            setupEvents();
+        });
+
+        function setupEvents() {
+            document.getElementById('audioFile').addEventListener('change', e => {
+                if (e.target.files[0]) handleFile(e.target.files[0]);
+            });
+            document.getElementById('separateBtn').addEventListener('click', startSeparation);
+            document.getElementById('playOriginalBtn').addEventListener('click', playOriginal);
+            document.getElementById('stopBtn').addEventListener('click', stopAudio);
+            document.getElementById('pitchSlider').addEventListener('input', updatePitch);
+            document.getElementById('speedSlider').addEventListener('input', updateSpeed);
+
+            document.querySelectorAll('.stem-option').forEach(btn => {
+                btn.addEventListener('click', e => {
+                    document.querySelectorAll('.stem-option').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    selectedStems = e.target.dataset.stems;
+                });
+            });
+
+            const dz = document.getElementById('dropZone');
+            dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('border-indigo-500'); });
+            dz.addEventListener('dragleave', () => dz.classList.remove('border-indigo-500'));
+            dz.addEventListener('drop', e => {
+                e.preventDefault();
+                dz.classList.remove('border-indigo-500');
+                if (e.dataTransfer.files[0]?.type.startsWith('audio/')) handleFile(e.dataTransfer.files[0]);
+            });
+        }
+
+        async function checkServer() {
+            try {
+                const r = await fetch(`${API_URL}/health`);
+                if (r.ok) {
+                    document.getElementById('serverStatus').innerHTML = '<span class="text-green-400">✅ Server ready</span>';
+                }
+            } catch (e) {
+                document.getElementById('serverStatus').innerHTML = '<span class="text-red-400">❌ Server offline</span>';
+            }
+        }
+
+        async function handleFile(file) {
+            uploadedFile = file;
+            document.getElementById('fileName').textContent = `📄 ${file.name}`;
+            document.getElementById('fileName').classList.remove('hidden');
+
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                gainNode = audioContext.createGain();
+                gainNode.connect(audioContext.destination);
+            }
+            await audioContext.resume();
+
+            try {
+                audioBuffer = await audioContext.decodeAudioData(await file.arrayBuffer());
+                document.getElementById('playOriginalBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('separateBtn').disabled = false;
+                document.getElementById('durationValue').textContent = Math.round(audioBuffer.duration);
+            } catch (e) { console.error('Decode error:', e); }
+
+            analyzeFile(file);
+        }
+
+        async function analyzeFile(file) {
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                document.getElementById('statusValue').textContent = '🔄';
+                document.getElementById('statusText').textContent = 'Analyzing...';
+                const r = await fetch(`${API_URL}/analyze`, { method: 'POST', body: fd });
+                if (r.ok) {
+                    const d = await r.json();
+                    document.getElementById('bpmValue').textContent = d.bpm;
+                    document.getElementById('keyValue').textContent = d.key;
+                    document.getElementById('scaleValue').textContent = d.scale;
+                    document.getElementById('durationValue').textContent = d.duration;
+                    document.getElementById('statusValue').textContent = '✅';
+                    document.getElementById('statusText').textContent = 'Ready';
+                }
+            } catch (e) {
+                document.getElementById('statusValue').textContent = '⚠️';
+                document.getElementById('statusText').textContent = 'Analysis failed';
+            }
+        }
+
+        async function startSeparation() {
+            if (!uploadedFile) return;
+            const fd = new FormData();
+            fd.append('file', uploadedFile);
+            fd.append('stems', selectedStems);
+
+            try {
+                document.getElementById('separateBtn').disabled = true;
+                document.getElementById('separateBtn').textContent = '⏳ Processing...';
+                document.getElementById('progressContainer').classList.remove('hidden');
+                document.getElementById('stemsContainer').classList.add('hidden');
+
+                const r = await fetch(`${API_URL}/separate`, { method: 'POST', body: fd });
+                if (r.ok) {
+                    currentJobId = (await r.json()).job_id;
+                    pollStatus();
+                }
+            } catch (e) {
+                alert('Separation failed. Is server running?');
+                document.getElementById('separateBtn').disabled = false;
+                document.getElementById('separateBtn').textContent = '🚀 Separate Stems';
+            }
+        }
+
+        async function pollStatus() {
+            if (!currentJobId) return;
+            try {
+                const r = await fetch(`${API_URL}/status/${currentJobId}`);
+                const d = await r.json();
+                document.getElementById('progressBar').style.width = `${d.progress}%`;
+                document.getElementById('progressPercent').textContent = `${d.progress}%`;
+
+                if (d.status === 'processing') {
+                    document.getElementById('progressText').textContent = 'AI processing...';
+                    setTimeout(pollStatus, 1000);
+                } else if (d.status === 'complete') {
+                    document.getElementById('progressText').textContent = 'Done!';
+                    document.getElementById('separateBtn').disabled = false;
+                    document.getElementById('separateBtn').textContent = '🚀 Separate Stems';
+                    showStems(d.files);
+                } else if (d.status === 'error') {
+                    document.getElementById('progressText').textContent = `Error: ${d.error}`;
+                    document.getElementById('separateBtn').disabled = false;
+                    document.getElementById('separateBtn').textContent = '🚀 Separate Stems';
+                }
+            } catch (e) { console.error('Poll error:', e); }
+        }
+
+        function showStems(files) {
+            document.getElementById('stemsContainer').classList.remove('hidden');
+            const c = document.getElementById('stemsList');
+            c.innerHTML = '';
+            const emojis = { vocals: '🎤', accompaniment: '🎸', drums: '🥁', bass: '🎸', piano: '🎹', other: '🎵' };
+            files.forEach(f => {
+                const div = document.createElement('div');
+                div.className = 'bg-gray-700 rounded-lg p-4 flex items-center justify-between';
+                div.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl">${emojis[f.name] || '🎵'}</span>
+                        <span class="font-semibold">${f.name.charAt(0).toUpperCase() + f.name.slice(1)}</span>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="playStem('${f.path}')" class="bg-indigo-600 hover:bg-indigo-700 px-3 py-2 rounded-lg text-sm">▶️</button>
+                        <a href="${f.path}" download class="bg-green-600 hover:bg-green-700 px-3 py-2 rounded-lg text-sm">💾</a>
+                    </div>
+                `;
+                c.appendChild(div);
+            });
+        }
+
+        async function playStem(path) {
+            stopAudio();
+            try {
+                const r = await fetch(path);
+                const buf = await audioContext.decodeAudioData(await r.arrayBuffer());
+                sourceNode = audioContext.createBufferSource();
+                sourceNode.buffer = buf;
+                sourceNode.playbackRate.value = currentSpeed * Math.pow(2, currentPitch / 12);
+                sourceNode.connect(gainNode);
+                sourceNode.start(0);
+                isPlaying = true;
+                sourceNode.onended = () => { isPlaying = false; };
+            } catch (e) { console.error('Play stem error:', e); }
+        }
+
+        async function playOriginal() {
+            if (!audioBuffer) return;
+            await audioContext.resume();
+            stopAudio();
+            sourceNode = audioContext.createBufferSource();
+            sourceNode.buffer = audioBuffer;
+            sourceNode.playbackRate.value = currentSpeed * Math.pow(2, currentPitch / 12);
+            sourceNode.connect(gainNode);
+            sourceNode.start(0);
+            isPlaying = true;
+            document.getElementById('statusValue').textContent = '▶️';
+            document.getElementById('statusText').textContent = 'Playing';
+            sourceNode.onended = () => {
+                isPlaying = false;
+                document.getElementById('statusValue').textContent = '⏸️';
+                document.getElementById('statusText').textContent = 'Ready';
+            };
+        }
+
+        function stopAudio() {
+            if (sourceNode) { try { sourceNode.stop(); sourceNode.disconnect(); } catch (e) {} sourceNode = null; }
+            isPlaying = false;
+            document.getElementById('statusValue').textContent = '⏸️';
+            document.getElementById('statusText').textContent = 'Stopped';
+        }
+
+        function updatePitch() {
+            currentPitch = parseInt(document.getElementById('pitchSlider').value);
+            document.getElementById('pitchDisplay').textContent = `${currentPitch > 0 ? '+' : ''}${currentPitch} semitones`;
+            if (isPlaying && sourceNode) sourceNode.playbackRate.value = currentSpeed * Math.pow(2, currentPitch / 12);
+        }
+
+        function updateSpeed() {
+            currentSpeed = parseInt(document.getElementById('speedSlider').value) / 100;
+            document.getElementById('speedDisplay').textContent = `${Math.round(currentSpeed * 100)}%`;
+            if (isPlaying && sourceNode) sourceNode.playbackRate.value = currentSpeed * Math.pow(2, currentPitch / 12);
+        }
+    </script>
+</body>
+</html>

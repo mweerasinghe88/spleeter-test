@@ -1,7 +1,7 @@
 """
-Spleeter API Server - Full Version with Queue
-=============================================
-Production-ready stem separation for Worship Team Sync
+Spleeter API Server - Memory Optimized
+======================================
+Uses 2-stem by default, limits duration, aggressive cleanup
 """
 
 from flask import Flask, request, jsonify, send_file, send_from_directory
@@ -11,6 +11,7 @@ import tempfile
 import uuid
 import threading
 import time
+import gc
 from collections import OrderedDict
 
 app = Flask(__name__, static_folder='static')
@@ -18,18 +19,24 @@ CORS(app)
 
 # Job queue and status tracking
 jobs = OrderedDict()
-job_queue = []
 queue_lock = threading.Lock()
 is_processing = False
+
+# Separator instance (reuse to save memory)
+separator_instance = None
+current_model = None
 
 # Output directory
 OUTPUT_DIR = os.environ.get('OUTPUT_DIR', '/tmp/spleeter-output')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-print(f"🚀 Starting Spleeter API Server (Full Version)")
-print(f"📁 Output directory: {OUTPUT_DIR}")
+# Memory limit - max 5 minutes of audio
+MAX_DURATION_SECONDS = 300
 
-# Serve static files
+print(f"🚀 Starting Spleeter API Server (Memory Optimized)")
+print(f"📁 Output directory: {OUTPUT_DIR}")
+print(f"⏱️ Max duration: {MAX_DURATION_SECONDS}s")
+
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
@@ -40,9 +47,10 @@ def health():
     processing = len([j for j in jobs.values() if j['status'] == 'processing'])
     return jsonify({
         'status': 'ok',
-        'message': 'Spleeter API (Full Version)',
+        'message': 'Spleeter API (Memory Optimized)',
         'queue_length': queue_length,
-        'currently_processing': processing
+        'currently_processing': processing,
+        'max_duration': MAX_DURATION_SECONDS
     })
 
 @app.route('/api/analyze', methods=['POST'])
@@ -59,8 +67,8 @@ def analyze_audio():
     file.save(temp_path)
     
     try:
-        # Load first 60 seconds for analysis
-        y, sr = librosa.load(temp_path, sr=22050, mono=True, duration=60)
+        # Load first 30 seconds only for analysis (saves memory)
+        y, sr = librosa.load(temp_path, sr=22050, mono=True, duration=30)
         
         # BPM Detection
         tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
@@ -77,14 +85,19 @@ def analyze_audio():
         minor_third = chroma_avg[(key_index + 3) % 12]
         scale = 'Major' if major_third > minor_third else 'Minor'
         
-        # Get full duration
+        # Get duration without loading whole file
         duration = librosa.get_duration(path=temp_path)
+        
+        # Cleanup
+        del y, chroma, chroma_avg
+        gc.collect()
         
         return jsonify({
             'bpm': round(bpm),
             'key': keys[key_index],
             'scale': scale,
-            'duration': round(duration, 2)
+            'duration': round(duration, 2),
+            'max_duration': MAX_DURATION_SECONDS
         })
         
     except Exception as e:
@@ -93,6 +106,7 @@ def analyze_audio():
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+        gc.collect()
 
 @app.route('/api/separate', methods=['POST'])
 def separate_audio():
@@ -101,7 +115,11 @@ def separate_audio():
         return jsonify({'error': 'No file provided'}), 400
     
     file = request.files['file']
-    stems = request.form.get('stems', '2')
+    stems = request.form.get('stems', '2')  # Default to 2 stems (least memory)
+    
+    # Force 2 stems for now to save memory
+    if stems == '5':
+        stems = '4'  # 5-stem uses too much memory
     
     # Create job
     job_id = str(uuid.uuid4())
@@ -111,7 +129,17 @@ def separate_audio():
     input_path = os.path.join(job_dir, 'input.mp3')
     file.save(input_path)
     
-    # Calculate queue position
+    # Check duration
+    try:
+        import librosa
+        duration = librosa.get_duration(path=input_path)
+        if duration > MAX_DURATION_SECONDS:
+            return jsonify({
+                'error': f'Audio too long ({int(duration)}s). Max is {MAX_DURATION_SECONDS}s (5 min). Please trim your file.'
+            }), 400
+    except:
+        pass  # Continue anyway
+    
     with queue_lock:
         queue_position = len([j for j in jobs.values() if j['status'] in ['queued', 'processing']])
         
@@ -125,18 +153,17 @@ def separate_audio():
             'input_path': input_path
         }
     
-    # Start processor if not running
     start_queue_processor()
     
     return jsonify({
         'job_id': job_id,
         'status': 'queued',
         'queue_position': queue_position,
+        'stems': stems,
         'message': f"You're #{queue_position + 1} in queue" if queue_position > 0 else "Processing now..."
     })
 
 def start_queue_processor():
-    """Start background thread to process queue"""
     global is_processing
     with queue_lock:
         if is_processing:
@@ -147,14 +174,12 @@ def start_queue_processor():
     thread.start()
 
 def process_queue():
-    """Process jobs in queue one at a time"""
     global is_processing
     
     while True:
         job_to_process = None
         
         with queue_lock:
-            # Find next queued job
             for job_id, job in jobs.items():
                 if job['status'] == 'queued':
                     job_to_process = (job_id, job)
@@ -167,7 +192,7 @@ def process_queue():
         job_id, job = job_to_process
         run_separation(job_id)
         
-        # Update queue positions for remaining jobs
+        # Update queue positions
         with queue_lock:
             position = 0
             for jid, j in jobs.items():
@@ -176,31 +201,43 @@ def process_queue():
                     position += 1
 
 def run_separation(job_id):
-    """Run Spleeter separation"""
+    global separator_instance, current_model
+    
     try:
         jobs[job_id]['status'] = 'processing'
         jobs[job_id]['progress'] = 5
         jobs[job_id]['queue_position'] = 0
         
-        print(f"🎵 Starting separation for job {job_id}")
+        stems = jobs[job_id]['stems']
+        input_path = jobs[job_id]['input_path']
+        model = f'spleeter:{stems}stems'
         
-        # Lazy import Spleeter (heavy)
-        from spleeter.separator import Separator
+        print(f"🎵 Starting separation for job {job_id}")
+        print(f"📦 Model: {model}")
+        
+        # Clear old separator if model changed
+        if separator_instance is not None and current_model != model:
+            print("♻️ Clearing old model from memory...")
+            del separator_instance
+            separator_instance = None
+            gc.collect()
         
         jobs[job_id]['progress'] = 10
         
-        stems = jobs[job_id]['stems']
-        input_path = jobs[job_id]['input_path']
+        # Lazy load Spleeter
+        from spleeter.separator import Separator
         
-        model = f'spleeter:{stems}stems'
-        print(f"📦 Loading model: {model}")
-        separator = Separator(model)
+        if separator_instance is None or current_model != model:
+            print(f"📦 Loading model: {model}")
+            separator_instance = Separator(model)
+            current_model = model
         
         jobs[job_id]['progress'] = 30
         
         output_dir = os.path.join(OUTPUT_DIR, job_id, 'stems')
         print(f"🔄 Separating audio...")
-        separator.separate_to_file(input_path, output_dir)
+        
+        separator_instance.separate_to_file(input_path, output_dir)
         
         jobs[job_id]['progress'] = 90
         
@@ -220,10 +257,18 @@ def run_separation(job_id):
         jobs[job_id]['status'] = 'complete'
         jobs[job_id]['progress'] = 100
         
+        # Cleanup input file to save space
+        if os.path.exists(input_path):
+            os.remove(input_path)
+        
     except Exception as e:
         print(f"❌ Separation error: {e}")
+        import traceback
+        traceback.print_exc()
         jobs[job_id]['status'] = 'error'
         jobs[job_id]['error'] = str(e)
+    finally:
+        gc.collect()
 
 @app.route('/api/status/<job_id>', methods=['GET'])
 def get_job_status(job_id):
@@ -241,7 +286,7 @@ def get_job_status(job_id):
         response['queue_position'] = job.get('queue_position', 0)
         response['message'] = f"You're #{job['queue_position'] + 1} in queue"
     elif job['status'] == 'processing':
-        response['message'] = "Processing your audio..."
+        response['message'] = "AI processing your audio..."
     elif job['status'] == 'error':
         response['error'] = job.get('error', 'Unknown error')
     
@@ -256,7 +301,6 @@ def download_stem(job_id, filename):
 
 @app.route('/api/queue', methods=['GET'])
 def get_queue_status():
-    """Get overall queue status"""
     queued = len([j for j in jobs.values() if j['status'] == 'queued'])
     processing = len([j for j in jobs.values() if j['status'] == 'processing'])
     completed = len([j for j in jobs.values() if j['status'] == 'complete'])
@@ -264,29 +308,8 @@ def get_queue_status():
     return jsonify({
         'queued': queued,
         'processing': processing,
-        'completed': completed,
-        'total': len(jobs)
+        'completed': completed
     })
-
-# Cleanup old jobs periodically (keep last 100)
-def cleanup_old_jobs():
-    with queue_lock:
-        if len(jobs) > 100:
-            # Remove oldest completed jobs
-            to_remove = []
-            for job_id, job in jobs.items():
-                if job['status'] in ['complete', 'error']:
-                    to_remove.append(job_id)
-                if len(jobs) - len(to_remove) <= 50:
-                    break
-            
-            for job_id in to_remove:
-                del jobs[job_id]
-                # Clean up files
-                job_dir = os.path.join(OUTPUT_DIR, job_id)
-                if os.path.exists(job_dir):
-                    import shutil
-                    shutil.rmtree(job_dir, ignore_errors=True)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

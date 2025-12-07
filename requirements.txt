@@ -1,8 +1,9 @@
-# Full version with Spleeter
+# Full version with Spleeter - fixed scipy version
 flask==2.0.3
 flask-cors==4.0.0
 spleeter==2.4.0
 librosa==0.10.1
 numpy==1.24.3
+scipy==1.11.4
 Werkzeug==2.0.3
 click==7.1.2

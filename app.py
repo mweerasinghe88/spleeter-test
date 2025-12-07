@@ -31,7 +31,7 @@ OUTPUT_DIR = os.environ.get('OUTPUT_DIR', '/tmp/spleeter-output')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Memory limit - max 5 minutes of audio
-MAX_DURATION_SECONDS = 300
+MAX_DURATION_SECONDS = 600
 
 print(f"🚀 Starting Spleeter API Server (Memory Optimized)")
 print(f"📁 Output directory: {OUTPUT_DIR}")

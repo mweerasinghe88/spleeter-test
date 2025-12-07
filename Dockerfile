@@ -15,10 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy app files
 COPY . .
 
-# Railway provides PORT env variable
-ENV PORT=5000
-
 EXPOSE 5000
 
-# Use shell form to expand $PORT
-CMD gunicorn --bind 0.0.0.0:$PORT --timeout 300 --workers 1 app:app
+# Use shell to expand $PORT, fallback to 5000
+CMD ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --timeout 300 --workers 1 app:app"]

@@ -1,6 +1,6 @@
 """
 Audio Analyzer API - Lite Version (No Spleeter)
-BPM/Key detection only - stem separation done client-side
+BPM/Key detection only - optimized for low memory
 """
 
 from flask import Flask, request, jsonify, send_file, send_from_directory
@@ -24,8 +24,11 @@ def health():
 @app.route('/api/analyze', methods=['POST'])
 def analyze_audio():
     """Analyze audio for BPM and Key detection"""
-    import librosa
-    import numpy as np
+    try:
+        import librosa
+        import numpy as np
+    except Exception as e:
+        return jsonify({'error': f'Failed to load libraries: {str(e)}'}), 500
     
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
@@ -36,7 +39,8 @@ def analyze_audio():
     file.save(temp_path)
     
     try:
-        y, sr = librosa.load(temp_path, sr=22050, mono=True)
+        # Only load first 60 seconds to save memory
+        y, sr = librosa.load(temp_path, sr=22050, mono=True, duration=60)
         
         # BPM Detection
         tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
@@ -53,7 +57,8 @@ def analyze_audio():
         minor_third = chroma_avg[(key_index + 3) % 12]
         scale = 'Major' if major_third > minor_third else 'Minor'
         
-        duration = librosa.get_duration(y=y, sr=sr)
+        # Get full duration without loading whole file
+        duration = librosa.get_duration(path=temp_path)
         
         return jsonify({
             'bpm': round(bpm),
@@ -63,6 +68,7 @@ def analyze_audio():
         })
         
     except Exception as e:
+        print(f"Analysis error: {str(e)}")
         return jsonify({'error': str(e)}), 500
     finally:
         if os.path.exists(temp_path):

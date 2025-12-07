@@ -235,18 +235,23 @@
                 document.getElementById('statusValue').textContent = '🔄';
                 document.getElementById('statusText').textContent = 'Analyzing...';
                 const r = await fetch(`${API_URL}/analyze`, { method: 'POST', body: fd });
-                if (r.ok) {
-                    const d = await r.json();
+                const d = await r.json();
+                if (r.ok && !d.error) {
                     document.getElementById('bpmValue').textContent = d.bpm;
                     document.getElementById('keyValue').textContent = d.key;
                     document.getElementById('scaleValue').textContent = d.scale;
                     document.getElementById('durationValue').textContent = d.duration;
                     document.getElementById('statusValue').textContent = '✅';
                     document.getElementById('statusText').textContent = 'Ready';
+                } else {
+                    console.error('Analysis error:', d.error);
+                    document.getElementById('statusValue').textContent = '⚠️';
+                    document.getElementById('statusText').textContent = d.error || 'Failed';
                 }
             } catch (e) {
+                console.error('Fetch error:', e);
                 document.getElementById('statusValue').textContent = '⚠️';
-                document.getElementById('statusText').textContent = 'Analysis failed';
+                document.getElementById('statusText').textContent = 'Network error';
             }
         }
 

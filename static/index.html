@@ -111,6 +111,7 @@
                 <div class="bg-gray-700 rounded-full h-3 overflow-hidden">
                     <div id="progressBar" class="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all" style="width: 0%"></div>
                 </div>
+                <div id="queueMessage" class="text-center text-yellow-400 text-sm mt-2 hidden"></div>
             </div>
 
             <div id="stemsContainer" class="hidden">
@@ -198,7 +199,12 @@
             try {
                 const r = await fetch(`${API_URL}/health`);
                 if (r.ok) {
-                    document.getElementById('serverStatus').innerHTML = '<span class="text-green-400">✅ Server ready</span>';
+                    const d = await r.json();
+                    let status = '✅ Server ready';
+                    if (d.queue_length > 0) {
+                        status += ` (${d.queue_length} in queue)`;
+                    }
+                    document.getElementById('serverStatus').innerHTML = `<span class="text-green-400">${status}</span>`;
                 }
             } catch (e) {
                 document.getElementById('serverStatus').innerHTML = '<span class="text-red-400">❌ Server offline</span>';
@@ -263,20 +269,38 @@
 
             try {
                 document.getElementById('separateBtn').disabled = true;
-                document.getElementById('separateBtn').textContent = '⏳ Processing...';
+                document.getElementById('separateBtn').textContent = '⏳ Uploading...';
                 document.getElementById('progressContainer').classList.remove('hidden');
                 document.getElementById('stemsContainer').classList.add('hidden');
+                document.getElementById('queueMessage').classList.add('hidden');
 
                 const r = await fetch(`${API_URL}/separate`, { method: 'POST', body: fd });
                 if (r.ok) {
-                    currentJobId = (await r.json()).job_id;
+                    const d = await r.json();
+                    currentJobId = d.job_id;
+                    
+                    if (d.queue_position > 0) {
+                        document.getElementById('queueMessage').textContent = d.message;
+                        document.getElementById('queueMessage').classList.remove('hidden');
+                    }
+                    
+                    document.getElementById('separateBtn').textContent = '⏳ Processing...';
                     pollStatus();
+                } else {
+                    const d = await r.json();
+                    alert(d.error || 'Separation failed');
+                    resetSeparateBtn();
                 }
             } catch (e) {
+                console.error('Separation error:', e);
                 alert('Separation failed. Is server running?');
-                document.getElementById('separateBtn').disabled = false;
-                document.getElementById('separateBtn').textContent = '🚀 Separate Stems';
+                resetSeparateBtn();
             }
+        }
+
+        function resetSeparateBtn() {
+            document.getElementById('separateBtn').disabled = false;
+            document.getElementById('separateBtn').textContent = '🚀 Separate Stems';
         }
 
         async function pollStatus() {
@@ -284,23 +308,34 @@
             try {
                 const r = await fetch(`${API_URL}/status/${currentJobId}`);
                 const d = await r.json();
+                
                 document.getElementById('progressBar').style.width = `${d.progress}%`;
                 document.getElementById('progressPercent').textContent = `${d.progress}%`;
 
-                if (d.status === 'processing') {
-                    document.getElementById('progressText').textContent = 'AI processing...';
+                if (d.status === 'queued') {
+                    document.getElementById('progressText').textContent = 'In queue...';
+                    document.getElementById('queueMessage').textContent = d.message || `Position: ${d.queue_position + 1}`;
+                    document.getElementById('queueMessage').classList.remove('hidden');
+                    setTimeout(pollStatus, 2000);
+                } else if (d.status === 'processing') {
+                    document.getElementById('progressText').textContent = d.message || 'AI processing...';
+                    document.getElementById('queueMessage').classList.add('hidden');
                     setTimeout(pollStatus, 1000);
                 } else if (d.status === 'complete') {
-                    document.getElementById('progressText').textContent = 'Done!';
-                    document.getElementById('separateBtn').disabled = false;
-                    document.getElementById('separateBtn').textContent = '🚀 Separate Stems';
+                    document.getElementById('progressText').textContent = '✅ Done!';
+                    document.getElementById('queueMessage').classList.add('hidden');
+                    resetSeparateBtn();
                     showStems(d.files);
+                    checkServer(); // Update queue count
                 } else if (d.status === 'error') {
-                    document.getElementById('progressText').textContent = `Error: ${d.error}`;
-                    document.getElementById('separateBtn').disabled = false;
-                    document.getElementById('separateBtn').textContent = '🚀 Separate Stems';
+                    document.getElementById('progressText').textContent = `❌ Error: ${d.error}`;
+                    document.getElementById('queueMessage').classList.add('hidden');
+                    resetSeparateBtn();
                 }
-            } catch (e) { console.error('Poll error:', e); }
+            } catch (e) { 
+                console.error('Poll error:', e);
+                setTimeout(pollStatus, 2000);
+            }
         }
 
         function showStems(files) {

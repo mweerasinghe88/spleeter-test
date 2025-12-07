@@ -8,11 +8,8 @@ from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 import os
 import tempfile
-import shutil
 import uuid
 import threading
-import librosa
-import numpy as np
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
@@ -24,6 +21,9 @@ jobs = {}
 OUTPUT_DIR = os.environ.get('OUTPUT_DIR', '/tmp/spleeter-output')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+print(f"Starting Spleeter API Server...")
+print(f"Output directory: {OUTPUT_DIR}")
+
 # Serve static files
 @app.route('/')
 def index():
@@ -31,11 +31,16 @@ def index():
 
 @app.route('/api/health', methods=['GET'])
 def health():
+    # Simple health check - responds immediately
     return jsonify({'status': 'ok', 'message': 'Spleeter API is running'})
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_audio():
     """Analyze audio for BPM and Key detection"""
+    # Lazy import to speed up startup
+    import librosa
+    import numpy as np
+    
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
     
@@ -108,6 +113,7 @@ def separate_audio():
 def run_separation(job_id, input_path, stems):
     """Run Spleeter separation in background"""
     try:
+        # Lazy import - only loads TensorFlow when needed
         from spleeter.separator import Separator
         
         jobs[job_id]['progress'] = 10
@@ -156,5 +162,5 @@ def download_stem(job_id, filename):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting Spleeter API on port {port}")
+    print(f"Starting on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

@@ -17,5 +17,5 @@ COPY . .
 
 EXPOSE 5000
 
-# Use shell to expand $PORT, fallback to 5000
-CMD ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --timeout 300 --workers 1 app:app"]
+# Use Python directly - more reliable on Railway
+CMD ["python", "app.py"]

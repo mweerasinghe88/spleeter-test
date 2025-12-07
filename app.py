@@ -1,7 +1,5 @@
 """
 Spleeter API Server - Production Ready
-======================================
-Deploy to Railway.app, Render.com, or any Python host
 """
 
 from flask import Flask, request, jsonify, send_file, send_from_directory
@@ -21,9 +19,6 @@ jobs = {}
 OUTPUT_DIR = os.environ.get('OUTPUT_DIR', '/tmp/spleeter-output')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-print(f"Starting Spleeter API Server...")
-print(f"Output directory: {OUTPUT_DIR}")
-
 # Serve static files
 @app.route('/')
 def index():
@@ -31,13 +26,11 @@ def index():
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    # Simple health check - responds immediately
     return jsonify({'status': 'ok', 'message': 'Spleeter API is running'})
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_audio():
     """Analyze audio for BPM and Key detection"""
-    # Lazy import to speed up startup
     import librosa
     import numpy as np
     
@@ -52,11 +45,9 @@ def analyze_audio():
     try:
         y, sr = librosa.load(temp_path, sr=22050, mono=True)
         
-        # BPM Detection
         tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
         bpm = float(tempo) if hasattr(tempo, '__float__') else float(tempo[0])
         
-        # Key Detection
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
         chroma_avg = np.mean(chroma, axis=1)
         
@@ -113,7 +104,6 @@ def separate_audio():
 def run_separation(job_id, input_path, stems):
     """Run Spleeter separation in background"""
     try:
-        # Lazy import - only loads TensorFlow when needed
         from spleeter.separator import Separator
         
         jobs[job_id]['progress'] = 10
@@ -161,6 +151,7 @@ def download_stem(job_id, filename):
     return jsonify({'error': 'File not found'}), 404
 
 if __name__ == '__main__':
+    # Railway provides PORT env variable
     port = int(os.environ.get('PORT', 5000))
-    print(f"Starting on port {port}")
+    print(f"Starting Spleeter API on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
